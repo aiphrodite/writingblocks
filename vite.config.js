@@ -85,6 +85,7 @@ function gitApiPlugin() {
 }
 
 export default defineConfig({
+  base: '/writingblocks/',
   plugins: [react(), gitApiPlugin()],
   resolve: {
     alias: {

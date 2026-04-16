@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Trash2, Lightbulb, PenLine, CheckCircle2, Sparkles, Loader2, ArrowRight } from 'lucide-react'
+import { Trash2, Lightbulb, PenLine, CheckCircle2, Sparkles, Loader2, ArrowRight, Check, X } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,9 @@ import {
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { useSettings } from '@/hooks/useSettings'
+import { generateWithClaude, buildUserContent } from '@/lib/claudeApi'
+import { saveGitSnapshot } from '@/lib/gitApi'
 
 const TWEET_MAX = 280
 const LINKEDIN_MAX = 3000
@@ -70,26 +73,109 @@ function StatusPicker({ value, onChange }) {
   )
 }
 
-export function Editor({ idea, onChange, onDelete }) {
+export function Editor({ idea, onChange, onDelete, ideas }) {
   const titleRef = useRef(null)
   const [activeTab, setActiveTab] = useState('tweet')
   const [generating, setGenerating] = useState({ tweet: false, linkedin: false, substack: false })
+  // { platform, text } when we have a pending AI result awaiting approval
+  const [pendingResult, setPendingResult] = useState(null)
+  const [genError, setGenError] = useState(null)
+  const { settings } = useSettings()
 
   useEffect(() => {
     if (idea && !idea.title) titleRef.current?.focus()
   }, [idea?.id])
 
-  // Cancel generation when switching away from a tab by clicking its write side
+  // Cancel generation / clear pending result when switching tabs via write side
   const handleWriteClick = useCallback((platform) => {
     setGenerating(g => ({ ...g, [platform]: false }))
+    setPendingResult(prev => prev?.platform === platform ? null : prev)
+    setGenError(null)
   }, [])
 
-  // Trigger AI generation for a platform; also switches to that tab
-  const handleGenerate = useCallback((platform) => {
+  // Trigger AI generation for a platform
+  const handleGenerate = useCallback(async (platform) => {
+    if (!idea) return
     setActiveTab(platform)
     setGenerating(g => ({ ...g, [platform]: true }))
-    // TODO: call AI generation here, then on completion:
-    // setGenerating(g => ({ ...g, [platform]: false }))
+    setPendingResult(null)
+    setGenError(null)
+
+    // 1. Save current state to version history before generating
+    try {
+      if (ideas && ideas.length > 0) {
+        await saveGitSnapshot(ideas, `Before AI generation — ${idea.title || 'Untitled'} (${platform})`)
+      }
+    } catch {
+      // Non-blocking: if git snapshot fails (e.g. in production), continue anyway
+    }
+
+    // 2. Call Claude
+    try {
+      const promptKey = platform === 'tweet'
+        ? 'aiPromptTweet'
+        : platform === 'linkedin'
+          ? 'aiPromptLinkedin'
+          : 'aiPromptSubstack'
+
+      const text = await generateWithClaude({
+        apiKey: settings.aiApiKey,
+        model: settings.aiModel || 'claude-sonnet-4-5',
+        systemPrompt: settings[promptKey],
+        userContent: buildUserContent(idea),
+      })
+
+      setGenerating(g => ({ ...g, [platform]: false }))
+      setPendingResult({ platform, text })
+    } catch (err) {
+      setGenerating(g => ({ ...g, [platform]: false }))
+      setGenError({ platform, message: err.message })
+    }
+  }, [idea, ideas, settings])
+
+  // Approve: apply AI result to the idea field + save to history
+  const handleApprove = useCallback(async (platform, text) => {
+    setPendingResult(null)
+    if (platform === 'substack') {
+      // Parse "Title: ..." from first line if present
+      const lines = text.split('\n')
+      const titleLine = lines[0]?.match(/^Title:\s*(.+)/i)
+      if (titleLine) {
+        onChange({ substackTitle: titleLine[1].trim(), substackBody: lines.slice(1).join('\n').trim() })
+      } else {
+        onChange({ substackBody: text })
+      }
+    } else if (platform === 'tweet') {
+      onChange({ tweet: text })
+    } else if (platform === 'linkedin') {
+      onChange({ linkedin: text })
+    }
+
+    // Save post-approval snapshot
+    try {
+      if (ideas && ideas.length > 0) {
+        // Build updated ideas list for the snapshot
+        const updatedIdea = platform === 'substack'
+          ? (() => {
+              const lines = text.split('\n')
+              const titleLine = lines[0]?.match(/^Title:\s*(.+)/i)
+              return titleLine
+                ? { ...idea, substackTitle: titleLine[1].trim(), substackBody: lines.slice(1).join('\n').trim() }
+                : { ...idea, substackBody: text }
+            })()
+          : { ...idea, [platform]: text }
+        const updatedIdeas = ideas.map(i => i.id === idea.id ? updatedIdea : i)
+        await saveGitSnapshot(updatedIdeas, `AI generated ${platform} — ${idea.title || 'Untitled'}`)
+      }
+    } catch {
+      // Non-blocking
+    }
+  }, [idea, ideas, onChange])
+
+  // Reject: just dismiss the pending result
+  const handleReject = useCallback(() => {
+    setPendingResult(null)
+    setGenError(null)
   }, [])
 
   if (!idea) return <EmptyState />
@@ -201,55 +287,94 @@ export function Editor({ idea, onChange, onDelete }) {
 
           {/* Tweet */}
           <TabsContent value="tweet" className="m-0 flex flex-col px-6 pt-4">
-            <div className="flex items-center justify-between gap-4 pb-2">
-              <p className="text-xs italic text-muted-foreground">Short, punchy, skimmable. Hook in the first line.</p>
-              <CharCounter current={idea.tweet.length} max={TWEET_MAX} />
-            </div>
-            <Textarea
-              value={idea.tweet}
-              onChange={e => onChange({ tweet: e.target.value })}
-              placeholder="Write your tweet here…"
-              maxLength={TWEET_MAX}
-              className="min-h-[180px] resize-none text-sm leading-relaxed"
-            />
-            <PlatformTip>Lead with the insight, not the setup. Use line breaks for breathing room. One clear CTA or question at the end.</PlatformTip>
+            {pendingResult?.platform === 'tweet' ? (
+              <AiResultPanel
+                text={pendingResult.text}
+                platform="tweet"
+                onApprove={() => handleApprove('tweet', pendingResult.text)}
+                onReject={handleReject}
+              />
+            ) : genError?.platform === 'tweet' ? (
+              <AiErrorPanel message={genError.message} onDismiss={handleReject} />
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-4 pb-2">
+                  <p className="text-xs italic text-muted-foreground">Short, punchy, skimmable. Hook in the first line.</p>
+                  <CharCounter current={idea.tweet.length} max={TWEET_MAX} />
+                </div>
+                <Textarea
+                  value={idea.tweet}
+                  onChange={e => onChange({ tweet: e.target.value })}
+                  placeholder="Write your tweet here…"
+                  maxLength={TWEET_MAX}
+                  className="min-h-[180px] resize-none text-sm leading-relaxed"
+                />
+                <PlatformTip>Lead with the insight, not the setup. Use line breaks for breathing room. One clear CTA or question at the end.</PlatformTip>
+              </>
+            )}
           </TabsContent>
 
           {/* LinkedIn */}
           <TabsContent value="linkedin" className="m-0 flex flex-col px-6 pt-4">
-            <div className="flex items-center justify-between gap-4 pb-2">
-              <p className="text-xs italic text-muted-foreground">Professional tone, personal story. Hook before "see more" (first 2–3 lines).</p>
-              <CharCounter current={idea.linkedin.length} max={LINKEDIN_MAX} />
-            </div>
-            <Textarea
-              value={idea.linkedin}
-              onChange={e => onChange({ linkedin: e.target.value })}
-              placeholder="Write your LinkedIn post here…"
-              maxLength={LINKEDIN_MAX}
-              className="min-h-[260px] resize-none text-sm leading-relaxed"
-            />
-            <PlatformTip>Open bold or counterintuitive. Short paragraphs. End with a question to drive comments.</PlatformTip>
+            {pendingResult?.platform === 'linkedin' ? (
+              <AiResultPanel
+                text={pendingResult.text}
+                platform="linkedin"
+                onApprove={() => handleApprove('linkedin', pendingResult.text)}
+                onReject={handleReject}
+              />
+            ) : genError?.platform === 'linkedin' ? (
+              <AiErrorPanel message={genError.message} onDismiss={handleReject} />
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-4 pb-2">
+                  <p className="text-xs italic text-muted-foreground">Professional tone, personal story. Hook before "see more" (first 2–3 lines).</p>
+                  <CharCounter current={idea.linkedin.length} max={LINKEDIN_MAX} />
+                </div>
+                <Textarea
+                  value={idea.linkedin}
+                  onChange={e => onChange({ linkedin: e.target.value })}
+                  placeholder="Write your LinkedIn post here…"
+                  maxLength={LINKEDIN_MAX}
+                  className="min-h-[260px] resize-none text-sm leading-relaxed"
+                />
+                <PlatformTip>Open bold or counterintuitive. Short paragraphs. End with a question to drive comments.</PlatformTip>
+              </>
+            )}
           </TabsContent>
 
           {/* Substack */}
           <TabsContent value="substack" className="m-0 flex flex-col gap-3 px-6 pt-4">
-            <div className="flex items-center justify-between gap-4">
-              <p className="text-xs italic text-muted-foreground">Long-form essay or newsletter. Room for nuance, stories, and depth.</p>
-              <CharCounter current={wordCount(idea.substackBody)} isWords />
-            </div>
-            <Input
-              value={idea.substackTitle}
-              onChange={e => onChange({ substackTitle: e.target.value })}
-              placeholder="Post title…"
-              className="text-sm font-semibold"
-            />
-            <Textarea
-              value={idea.substackBody}
-              onChange={e => onChange({ substackBody: e.target.value })}
-              placeholder="Write your Substack post here…"
-              className="min-h-[300px] resize-none text-sm leading-relaxed"
-            />
-            <PlatformTip>Start with why this matters. Use a narrative arc. Include concrete examples or data. End with reflection or a CTA.</PlatformTip>
+            {pendingResult?.platform === 'substack' ? (
+              <AiResultPanel
+                text={pendingResult.text}
+                platform="substack"
+                onApprove={() => handleApprove('substack', pendingResult.text)}
+                onReject={handleReject}
+              />
+            ) : genError?.platform === 'substack' ? (
+              <AiErrorPanel message={genError.message} onDismiss={handleReject} />
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-xs italic text-muted-foreground">Long-form essay or newsletter. Room for nuance, stories, and depth.</p>
+                  <CharCounter current={wordCount(idea.substackBody)} isWords />
+                </div>
+                <Input
+                  value={idea.substackTitle}
+                  onChange={e => onChange({ substackTitle: e.target.value })}
+                  placeholder="Post title…"
+                  className="text-sm font-semibold"
+                />
+                <Textarea
+                  value={idea.substackBody}
+                  onChange={e => onChange({ substackBody: e.target.value })}
+                  placeholder="Write your Substack post here…"
+                  className="min-h-[300px] resize-none text-sm leading-relaxed"
+                />
+                <PlatformTip>Start with why this matters. Use a narrative arc. Include concrete examples or data. End with reflection or a CTA.</PlatformTip>
+              </>
+            )}
           </TabsContent>
 
         </div>
@@ -304,6 +429,68 @@ function PlatformTab({ value, label, glyph, isActive, isGenerating, onWriteClick
 
       </div>
     </TabsTrigger>
+  )
+}
+
+function AiResultPanel({ text, platform, onApprove, onReject }) {
+  const PLATFORM_LABELS = { tweet: 'Tweet', linkedin: 'LinkedIn post', substack: 'Substack post' }
+  return (
+    <div className="flex flex-col gap-3 py-1">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-violet-500" />
+          <span className="text-xs font-semibold text-foreground">AI-generated {PLATFORM_LABELS[platform]}</span>
+        </div>
+        <span className="text-[10px] text-muted-foreground">Review before saving</span>
+      </div>
+      <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:border-violet-800/40 dark:bg-violet-950/20 px-4 py-3">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{text}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onApprove}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-700"
+        >
+          <Check className="h-3.5 w-3.5" />
+          Approve &amp; save
+        </button>
+        <button
+          onClick={onReject}
+          className="flex items-center justify-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+        >
+          <X className="h-3.5 w-3.5" />
+          Discard
+        </button>
+      </div>
+      <p className="text-[10px] text-muted-foreground/60">
+        Approving will replace your current {PLATFORM_LABELS[platform]} and save a version history snapshot.
+      </p>
+    </div>
+  )
+}
+
+function AiErrorPanel({ message, onDismiss }) {
+  return (
+    <div className="flex flex-col gap-3 py-1">
+      <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+        <X className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-semibold text-destructive">Generation failed</p>
+          <p className="text-xs text-muted-foreground">{message}</p>
+          {message?.includes('API key') && (
+            <p className="text-xs text-muted-foreground">
+              Open <strong>Settings</strong> (gear icon) and add your Anthropic API key.
+            </p>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={onDismiss}
+        className="self-start rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+      >
+        Dismiss
+      </button>
+    </div>
   )
 }
 

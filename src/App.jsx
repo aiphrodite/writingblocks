@@ -1,121 +1,89 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useEffect, useCallback } from 'react'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { Sidebar } from '@/components/Sidebar'
+import { Editor } from '@/components/Editor'
+import { useIdeas } from '@/hooks/useIdeas'
+import { saveIdeas } from '@/lib/storage'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const { ideas, addIdea, updateIdea, deleteIdea } = useIdeas()
+  const [activeId, setActiveId] = useState(() => {
+    return sessionStorage.getItem('writingblocks_activeId') || null
+  })
+
+  // Persist active selection across page reloads
+  useEffect(() => {
+    if (activeId) sessionStorage.setItem('writingblocks_activeId', activeId)
+    else sessionStorage.removeItem('writingblocks_activeId')
+  }, [activeId])
+
+  // If active idea was deleted, fall back to first available
+  useEffect(() => {
+    if (activeId && !ideas.find(i => i.id === activeId)) {
+      setActiveId(ideas[0]?.id ?? null)
+    }
+  }, [ideas, activeId])
+
+  // Auto-select first idea on mount
+  useEffect(() => {
+    if (!activeId && ideas.length > 0) {
+      setActiveId(ideas[0].id)
+    }
+  }, []) // eslint-disable-line
+
+  const handleAdd = useCallback(() => {
+    const id = addIdea()
+    setActiveId(id)
+  }, [addIdea])
+
+  const handleDelete = useCallback(() => {
+    const idx = ideas.findIndex(i => i.id === activeId)
+    deleteIdea(activeId)
+    const remaining = ideas.filter(i => i.id !== activeId)
+    setActiveId(remaining.length > 0 ? remaining[Math.min(idx, remaining.length - 1)].id : null)
+  }, [ideas, activeId, deleteIdea])
+
+  const handleChange = useCallback((patch) => {
+    if (activeId) updateIdea(activeId, patch)
+  }, [activeId, updateIdea])
+
+  // Cmd/Ctrl+N → new idea
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault()
+        handleAdd()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [handleAdd])
+
+  const handleRestore = useCallback((restoredIdeas) => {
+    saveIdeas(restoredIdeas)
+    window.location.reload()
+  }, [])
+
+  const activeIdea = ideas.find(i => i.id === activeId) ?? null
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    <TooltipProvider>
+      <div className="flex h-screen overflow-hidden bg-background">
+        <Sidebar
+          ideas={ideas}
+          activeId={activeId}
+          onSelect={setActiveId}
+          onAdd={handleAdd}
+          onRestore={handleRestore}
+        />
+        <main className="flex flex-1 flex-col overflow-hidden">
+          <Editor
+            idea={activeIdea}
+            onChange={handleChange}
+            onDelete={handleDelete}
+          />
+        </main>
+      </div>
+    </TooltipProvider>
   )
 }
-
-export default App

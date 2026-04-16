@@ -79,6 +79,7 @@ export default function App() {
         <main className="flex flex-1 flex-col overflow-hidden">
           <Editor
             idea={activeIdea}
+            ideas={ideas}
             onChange={handleChange}
             onDelete={handleDelete}
           />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Settings, Eye, EyeOff, Download, Sun, Moon } from 'lucide-react'
+import { Settings, Eye, EyeOff, Download, Sun, Moon, ChevronDown, ChevronUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSettings } from '@/hooks/useSettings'
 import { useTheme } from '@/hooks/useTheme'
@@ -9,6 +9,12 @@ const AI_MODELS = [
   { value: 'claude-opus-4-5',           label: 'Claude Opus 4.5',       badge: 'powerful' },
   { value: 'claude-sonnet-4-5',         label: 'Claude Sonnet 4.5',     badge: 'balanced' },
   { value: 'claude-haiku-3-5',          label: 'Claude Haiku 3.5',      badge: 'fast'     },
+]
+
+const PLATFORM_PROMPTS = [
+  { key: 'aiPromptTweet',     label: 'Tweet prompt',     glyph: '𝕏' },
+  { key: 'aiPromptLinkedin',  label: 'LinkedIn prompt',  glyph: 'in' },
+  { key: 'aiPromptSubstack',  label: 'Substack prompt',  glyph: 'S' },
 ]
 
 function Section({ title, children }) {
@@ -36,6 +42,7 @@ export function SettingsPanel({ ideas }) {
   const { settings, update } = useSettings()
   const { theme, toggle: toggleTheme } = useTheme()
   const [showKey, setShowKey] = useState(false)
+  const [promptsOpen, setPromptsOpen] = useState(false)
 
   function handleExport() {
     const blob = new Blob([JSON.stringify(ideas, null, 2)], { type: 'application/json' })
@@ -145,6 +152,42 @@ export function SettingsPanel({ ideas }) {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Per-platform prompts (collapsible) */}
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => setPromptsOpen(o => !o)}
+            className="flex items-center justify-between text-xs font-medium text-foreground"
+          >
+            <span>AI Prompts</span>
+            {promptsOpen
+              ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+              : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            }
+          </button>
+          {promptsOpen && (
+            <div className="flex flex-col gap-3">
+              {PLATFORM_PROMPTS.map(({ key, label, glyph }) => (
+                <div key={key} className="flex flex-col gap-1">
+                  <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                    <span className="inline-flex h-4 w-5 items-center justify-center rounded bg-muted text-[9px] font-bold">{glyph}</span>
+                    {label}
+                  </label>
+                  <textarea
+                    value={settings[key] ?? ''}
+                    onChange={e => update({ [key]: e.target.value })}
+                    rows={4}
+                    className="w-full rounded-md border border-border bg-background px-2.5 py-2 text-[11px] leading-relaxed text-foreground placeholder:text-muted-foreground/40 outline-none focus:ring-2 focus:ring-ring/40 resize-none"
+                  />
+                </div>
+              ))}
+              <p className="text-[10px] text-muted-foreground/60">
+                These system prompts are sent to Claude along with your idea title and context.
+              </p>
+            </div>
+          )}
         </div>
       </Section>
 

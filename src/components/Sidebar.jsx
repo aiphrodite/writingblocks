@@ -40,10 +40,6 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
   const [tab, setTab]             = useState('list')      // active sidebar tab
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  function toggleSettings() {
-    setSettingsOpen(o => !o)
-  }
-
   const visible = ideas.filter(idea => {
     if (filter !== 'all' && idea.status !== filter) return false
     if (!search.trim()) return true
@@ -73,8 +69,8 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
           {/* Settings */}
           <Button
             size="sm"
-            variant={settingsOpen ? 'secondary' : 'ghost'}
-            onClick={toggleSettings}
+            variant="ghost"
+            onClick={() => setSettingsOpen(true)}
             className="h-8 w-8 p-0"
             title="Settings"
           >
@@ -90,7 +86,7 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
 
       {/* ── Settings panel ── */}
       {settingsOpen ? (
-        <SettingsPanel ideas={ideas} />
+        <SettingsPanel ideas={ideas} onClose={() => setSettingsOpen(false)} />
       ) : (
         <>
           {/* Tab bar */}

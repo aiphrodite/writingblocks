@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { useSettings } from '@/hooks/useSettings'
-import { generateWithAI, buildUserContent } from '@/lib/aiApi'
+import { generateWithAi, buildUserContent, AI_PROVIDERS } from '@/lib/aiApi'
 import { saveGitSnapshot } from '@/lib/gitApi'
 
 const TWEET_MAX = 280
@@ -119,12 +119,14 @@ export function Editor({ idea, onChange, onDelete, ideas }) {
           : 'aiPromptSubstack'
 
       const provider = settings.aiProvider || 'anthropic'
-      const text = await generateWithAI({
+      const providerConfig = AI_PROVIDERS[provider]
+      const apiKey = provider === 'openai' ? settings.aiOpenaiKey : settings.aiAnthropicKey
+      const model  = (provider === 'openai' ? settings.aiOpenaiModel : settings.aiAnthropicModel) || providerConfig.defaultModel
+
+      const text = await generateWithAi({
         provider,
-        apiKey: provider === 'openai' ? settings.openaiApiKey : settings.anthropicApiKey,
-        model: provider === 'openai'
-          ? (settings.openaiModel || 'gpt-4o')
-          : (settings.anthropicModel || 'claude-sonnet-4-5'),
+        apiKey,
+        model,
         systemPrompt: settings[promptKey],
         userContent: buildUserContent(idea),
       })
@@ -483,7 +485,7 @@ function AiErrorPanel({ message, onDismiss }) {
           <p className="text-xs text-muted-foreground">{message}</p>
           {message?.includes('API key') && (
             <p className="text-xs text-muted-foreground">
-              Open <strong>Settings</strong> (gear icon) and add your API key.
+              Open <strong>Settings</strong> (gear icon) and add your Anthropic API key.
             </p>
           )}
         </div>

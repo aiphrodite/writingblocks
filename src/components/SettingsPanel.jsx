@@ -1,32 +1,10 @@
 import { useState } from 'react'
-import { Settings, Eye, EyeOff, Download, Sun, Moon, ChevronDown, ChevronUp } from 'lucide-react'
+import { Settings, Eye, EyeOff, Download, Sun, Moon, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSettings } from '@/hooks/useSettings'
 import { useTheme } from '@/hooks/useTheme'
+import { AI_PROVIDERS } from '@/lib/aiApi'
 import { cn } from '@/lib/utils'
-
-const AI_PROVIDERS = [
-  { value: 'anthropic', label: 'Claude' },
-  { value: 'openai',    label: 'OpenAI' },
-]
-
-const MODELS_BY_PROVIDER = {
-  anthropic: [
-    { value: 'claude-opus-4-5',   label: 'Claude Opus 4.5',   badge: 'powerful' },
-    { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', badge: 'balanced' },
-    { value: 'claude-haiku-3-5',  label: 'Claude Haiku 3.5',  badge: 'fast'     },
-  ],
-  openai: [
-    { value: 'gpt-4o',      label: 'GPT-4o',      badge: 'powerful' },
-    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo', badge: 'balanced' },
-    { value: 'gpt-4o-mini', label: 'GPT-4o mini', badge: 'fast'     },
-  ],
-}
-
-const PROVIDER_META = {
-  anthropic: { name: 'Anthropic', keyField: 'anthropicApiKey', modelField: 'anthropicModel', placeholder: 'sk-ant-…' },
-  openai:    { name: 'OpenAI',    keyField: 'openaiApiKey',    modelField: 'openaiModel',    placeholder: 'sk-…'     },
-}
 
 const PLATFORM_PROMPTS = [
   { key: 'aiPromptTweet',     label: 'Tweet prompt',     glyph: '𝕏' },
@@ -55,15 +33,17 @@ function Label({ htmlFor, children }) {
   )
 }
 
-export function SettingsPanel({ ideas }) {
+export function SettingsPanel({ ideas, onClose }) {
   const { settings, update } = useSettings()
   const { theme, toggle: toggleTheme } = useTheme()
   const [showKey, setShowKey] = useState(false)
   const [promptsOpen, setPromptsOpen] = useState(false)
 
-  const provider = settings.aiProvider || 'anthropic'
-  const { name: providerName, keyField, modelField, placeholder: keyPlaceholder } = PROVIDER_META[provider]
-  const models = MODELS_BY_PROVIDER[provider]
+  const providerConfig = AI_PROVIDERS[settings.aiProvider] ?? AI_PROVIDERS.anthropic
+  const apiKeyField  = settings.aiProvider === 'openai' ? 'aiOpenaiKey'   : 'aiAnthropicKey'
+  const modelField   = settings.aiProvider === 'openai' ? 'aiOpenaiModel' : 'aiAnthropicModel'
+  const apiKeyValue  = settings[apiKeyField] ?? ''
+  const modelValue   = settings[modelField] ?? providerConfig.defaultModel
 
   function handleExport() {
     const blob = new Blob([JSON.stringify(ideas, null, 2)], { type: 'application/json' })
@@ -80,7 +60,15 @@ export function SettingsPanel({ ideas }) {
     <div className="flex h-full flex-col overflow-y-auto">
 
       {/* Panel title */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-2">
+        <button
+          type="button"
+          onClick={onClose}
+          title="Back to ideas"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </button>
         <Settings className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-semibold text-foreground">Settings</span>
       </div>
@@ -119,36 +107,30 @@ export function SettingsPanel({ ideas }) {
       {/* ── AI ── */}
       <Section title="AI Generation">
         {/* Provider */}
-        <div className="flex items-center justify-between">
-          <Label>Provider</Label>
-          <div className="flex items-center gap-0.5 rounded-full border border-border bg-muted/40 p-0.5">
-            {AI_PROVIDERS.map(p => (
-              <button
-                key={p.value}
-                onClick={() => update({ aiProvider: p.value })}
-                className={cn(
-                  'rounded-full px-3 py-1 text-xs font-medium transition-all duration-200',
-                  provider === p.value
-                    ? 'bg-background text-foreground shadow-sm dark:bg-muted/80'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {p.label}
-              </button>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="ai-provider">Provider</Label>
+          <select
+            id="ai-provider"
+            value={settings.aiProvider}
+            onChange={e => update({ aiProvider: e.target.value })}
+            className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring/40"
+          >
+            {Object.entries(AI_PROVIDERS).map(([key, p]) => (
+              <option key={key} value={key}>{p.label}</option>
             ))}
-          </div>
+          </select>
         </div>
 
-        {/* API key (per provider) */}
+        {/* API key — per provider */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="ai-key">{providerName} API Key</Label>
+          <Label htmlFor="ai-key">{providerConfig.label} API Key</Label>
           <div className="relative">
             <input
               id="ai-key"
               type={showKey ? 'text' : 'password'}
-              value={settings[keyField] ?? ''}
-              onChange={e => update({ [keyField]: e.target.value })}
-              placeholder={keyPlaceholder}
+              value={apiKeyValue}
+              onChange={e => update({ [apiKeyField]: e.target.value })}
+              placeholder={providerConfig.keyPlaceholder}
               className="h-8 w-full rounded-md border border-border bg-background pr-8 pl-3 text-xs text-foreground placeholder:text-muted-foreground/40 outline-none focus:ring-2 focus:ring-ring/40 font-mono"
             />
             <button
@@ -163,21 +145,21 @@ export function SettingsPanel({ ideas }) {
             </button>
           </div>
           <p className="text-[10px] text-muted-foreground/60">
-            Stored only in your browser. Sent directly to {providerName} and nowhere else.
+            {providerConfig.keyHint}
           </p>
         </div>
 
-        {/* Model */}
+        {/* Model — per provider */}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="ai-model">Model</Label>
           <div className="flex flex-col gap-1">
-            {models.map(m => (
+            {providerConfig.models.map(m => (
               <button
                 key={m.value}
                 onClick={() => update({ [modelField]: m.value })}
                 className={cn(
                   'flex items-center justify-between rounded-md border px-3 py-2 text-left text-xs transition-colors',
-                  settings[modelField] === m.value
+                  modelValue === m.value
                     ? 'border-foreground/30 bg-accent text-foreground'
                     : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent/50'
                 )}
@@ -226,7 +208,7 @@ export function SettingsPanel({ ideas }) {
                 </div>
               ))}
               <p className="text-[10px] text-muted-foreground/60">
-                These system prompts are sent to Claude along with your idea title and context.
+                These system prompts are sent to the selected AI provider along with your idea title and context.
               </p>
             </div>
           )}

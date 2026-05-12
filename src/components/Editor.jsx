@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { useSettings } from '@/hooks/useSettings'
-import { generateWithClaude, buildUserContent } from '@/lib/claudeApi'
+import { generateWithAI, buildUserContent } from '@/lib/aiApi'
 import { saveGitSnapshot } from '@/lib/gitApi'
 
 const TWEET_MAX = 280
@@ -118,9 +118,13 @@ export function Editor({ idea, onChange, onDelete, ideas }) {
           ? 'aiPromptLinkedin'
           : 'aiPromptSubstack'
 
-      const text = await generateWithClaude({
-        apiKey: settings.aiApiKey,
-        model: settings.aiModel || 'claude-sonnet-4-5',
+      const provider = settings.aiProvider || 'anthropic'
+      const text = await generateWithAI({
+        provider,
+        apiKey: provider === 'openai' ? settings.openaiApiKey : settings.anthropicApiKey,
+        model: provider === 'openai'
+          ? (settings.openaiModel || 'gpt-4o')
+          : (settings.anthropicModel || 'claude-sonnet-4-5'),
         systemPrompt: settings[promptKey],
         userContent: buildUserContent(idea),
       })
@@ -479,7 +483,7 @@ function AiErrorPanel({ message, onDismiss }) {
           <p className="text-xs text-muted-foreground">{message}</p>
           {message?.includes('API key') && (
             <p className="text-xs text-muted-foreground">
-              Open <strong>Settings</strong> (gear icon) and add your Anthropic API key.
+              Open <strong>Settings</strong> (gear icon) and add your API key.
             </p>
           )}
         </div>

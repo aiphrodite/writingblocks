@@ -1,26 +1,14 @@
 import { useState } from 'react'
-import { Plus, Search, History, Settings, LayoutList } from 'lucide-react'
+import { Plus, Search, History, Settings, LayoutList, Workflow, StickyNote, BarChart3 } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { HistoryPanel } from '@/components/HistoryPanel'
 import { SettingsPanel } from '@/components/SettingsPanel'
+import { AuthPanel } from '@/components/AuthPanel'
+import { FLOW_NODES, FLOW_EDGES, platformHasDraft } from '@/lib/flowGraph'
 import { cn } from '@/lib/utils'
-
-const STATUS_CONFIG = {
-  idea:      { bg: 'bg-amber-50   dark:bg-amber-950/40',   ring: 'ring-amber-200   dark:ring-amber-800/60'   },
-  drafting:  { bg: 'bg-blue-50    dark:bg-blue-950/40',    ring: 'ring-blue-200    dark:ring-blue-800/60'    },
-  published: { bg: 'bg-emerald-50 dark:bg-emerald-950/40', ring: 'ring-emerald-200 dark:ring-emerald-800/60' },
-}
-
-const FILTERS = ['all', 'idea', 'drafting', 'published']
-
-function StatusDot({ status }) {
-  const cfg = STATUS_CONFIG[status]
-  return (
-    <span className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full ring-1', cfg?.bg, cfg?.ring)} />
-  )
-}
 
 function PlatformPip({ label, color }) {
   return (
@@ -33,39 +21,95 @@ function PlatformPip({ label, color }) {
   )
 }
 
-// tab: 'list' | 'history'
-export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
-  const [filter, setFilter]       = useState('all')
+// Compact non-interactive flow card for the sidebar's "Builds" tab. Each node
+// is filled when a draft exists for that platform, outlined otherwise.
+function MiniFlow({ idea }) {
+  const COL_X = [30, 110, 190]
+  const ROW_Y = [22, 62]
+  const R = 11
+
+  const pos = Object.fromEntries(
+    FLOW_NODES.map(n => [n.key, { x: COL_X[n.column], y: ROW_Y[n.row] }])
+  )
+
+  return (
+    <svg viewBox="0 0 220 88" className="w-full text-muted-foreground" aria-hidden="true">
+      {FLOW_EDGES.map(([from, to]) => {
+        const f = pos[from], t = pos[to]
+        const x1 = f.x + R, x2 = t.x - R
+        const cx = (x1 + x2) / 2
+        const d = `M ${x1} ${f.y} C ${cx} ${f.y}, ${cx} ${t.y}, ${x2} ${t.y}`
+        return (
+          <path key={`${from}-${to}`} d={d} fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="0.9" strokeLinecap="round" />
+        )
+      })}
+      {FLOW_NODES.map(n => {
+        const p = pos[n.key]
+        const has = platformHasDraft(idea, n.key)
+        const fillClass = has ? 'fill-foreground' : 'fill-background'
+        const strokeClass = has ? 'text-foreground' : 'text-muted-foreground/40'
+        const labelClass = has ? 'fill-background' : 'fill-muted-foreground/60'
+        return (
+          <g key={n.key} className={strokeClass}>
+            <circle cx={p.x} cy={p.y} r={R} className={fillClass} stroke="currentColor" strokeWidth="1" />
+            <text
+              x={p.x}
+              y={p.y + 3}
+              textAnchor="middle"
+              className={cn('text-[8px] font-bold', labelClass)}
+              style={{ fontFamily: 'inherit' }}
+            >
+              {n.glyph}
+            </text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+// tab: 'list' | 'builds' | 'history'
+export function Sidebar({ ideas, activeId, auth, syncState, onSelect, onAddBlock, onAddBuild, onRestore, onToggleAnalytics, analyticsActive }) {
   const [search, setSearch]       = useState('')
-  const [tab, setTab]             = useState('list')      // active sidebar tab
+  const [tab, setTab]             = useState('list')
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const visible = ideas.filter(idea => {
-    if (filter !== 'all' && idea.status !== filter) return false
+  const blocks = ideas.filter(i => i.type !== 'build')
+  const builds = ideas.filter(i => i.type === 'build')
+
+  const visibleBlocks = blocks.filter(idea => {
     if (!search.trim()) return true
     const q = search.toLowerCase()
     return idea.title.toLowerCase().includes(q) || idea.context.toLowerCase().includes(q)
   })
-
-  const counts = {
-    all:       ideas.length,
-    idea:      ideas.filter(i => i.status === 'idea').length,
-    drafting:  ideas.filter(i => i.status === 'drafting').length,
-    published: ideas.filter(i => i.status === 'published').length,
-  }
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-border bg-sidebar">
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-border">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-sm font-semibold tracking-tight text-foreground">Writing Blocks</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {ideas.length} {ideas.length === 1 ? 'idea' : 'ideas'}
+            {blocks.length} {blocks.length === 1 ? 'block' : 'blocks'} · {builds.length} {builds.length === 1 ? 'build' : 'builds'}
           </p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
+          {/* X Analytics */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onToggleAnalytics}
+                className={cn('h-8 w-8 p-0', analyticsActive && 'bg-accent text-accent-foreground')}
+              >
+                <BarChart3 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">X Analytics</TooltipContent>
+          </Tooltip>
+
           {/* Settings */}
           <Button
             size="sm"
@@ -77,18 +121,39 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
             <Settings className="h-4 w-4" />
           </Button>
 
-          {/* New idea */}
-          <Button size="sm" onClick={onAdd} className="h-8 w-8 rounded-full p-0">
-            <Plus className="h-4 w-4" />
-          </Button>
+          {/* New block (short idea) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onAddBlock}
+                className="h-8 w-8 p-0"
+              >
+                <StickyNote className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New block (⌘N)</TooltipContent>
+          </Tooltip>
+
+          {/* New build (full project) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="sm" onClick={onAddBuild} className="h-8 w-8 rounded-full p-0">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New build (⇧⌘N)</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
       {/* ── Settings panel ── */}
-      {settingsOpen ? (
-        <SettingsPanel ideas={ideas} onClose={() => setSettingsOpen(false)} />
-      ) : (
-        <>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {settingsOpen ? (
+          <SettingsPanel ideas={ideas} onClose={() => setSettingsOpen(false)} />
+        ) : (
+          <>
           {/* Tab bar */}
           <div className="flex border-b border-border shrink-0">
             <button
@@ -101,7 +166,19 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
               )}
             >
               <LayoutList className="h-3.5 w-3.5" />
-              Ideas
+              Blocks
+            </button>
+            <button
+              onClick={() => setTab('builds')}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors',
+                tab === 'builds'
+                  ? 'border-b-2 border-foreground text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Workflow className="h-3.5 w-3.5" />
+              Builds
             </button>
             <button
               onClick={() => setTab('history')}
@@ -128,7 +205,49 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
             />
           )}
 
-          {/* ── Tab: Ideas list ── */}
+          {/* ── Tab: Builds ── */}
+          {tab === 'builds' && (
+            <ScrollArea className="flex-1 px-2 pt-2">
+              {builds.length === 0 ? (
+                <div className="py-10 text-center text-xs text-muted-foreground">
+                  No builds yet.
+                </div>
+              ) : (
+                <ul className="space-y-1.5 pb-4">
+                  {builds.map(idea => {
+                    const isActive = idea.id === activeId
+                    return (
+                      <li key={idea.id}>
+                        <button
+                          onClick={() => onSelect(idea.id)}
+                          className={cn(
+                            'group w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
+                            isActive
+                              ? 'border-foreground/30 bg-accent text-accent-foreground'
+                              : 'border-border bg-background/50 hover:bg-accent/50 text-foreground'
+                          )}
+                        >
+                          <p className={cn('truncate text-sm font-medium leading-tight', !idea.title && 'italic text-muted-foreground')}>
+                            {idea.title || 'Untitled block'}
+                          </p>
+                          <div className="mt-2">
+                            <MiniFlow idea={idea} />
+                          </div>
+                          {Array.isArray(idea.sourceBlockIds) && idea.sourceBlockIds.length > 0 && (
+                            <p className="mt-1 text-[10px] text-muted-foreground">
+                              {idea.sourceBlockIds.length} input {idea.sourceBlockIds.length === 1 ? 'block' : 'blocks'}
+                            </p>
+                          )}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </ScrollArea>
+          )}
+
+          {/* ── Tab: Blocks list ── */}
           {tab === 'list' && (
             <>
               {/* Search */}
@@ -138,51 +257,22 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
                   <Input
                     value={search}
                     onChange={e => setSearch(e.target.value)}
-                    placeholder="Search ideas…"
+                    placeholder="Search blocks…"
                     className="h-8 pl-8 text-xs bg-background"
                   />
                 </div>
               </div>
 
-              {/* Filters */}
-              <div className="flex gap-1 px-3 pb-2">
-                {FILTERS.map(f => (
-                  <button
-                    key={f}
-                    onClick={() => {
-                      setFilter(f)
-                      const nextVisible = f === 'all' ? ideas : ideas.filter(i => i.status === f)
-                      if (nextVisible.length > 0 && !nextVisible.find(i => i.id === activeId)) {
-                        onSelect(nextVisible[0].id)
-                      }
-                    }}
-                    className={cn(
-                      'flex-1 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
-                      filter === f
-                        ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {f}
-                    {counts[f] > 0 && (
-                      <span className={cn('ml-1 text-[10px]', filter === f ? 'text-muted-foreground' : 'text-muted-foreground/60')}>
-                        {counts[f]}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              {/* Idea list */}
+              {/* Block list */}
               <ScrollArea className="flex-1 px-2">
-                {visible.length === 0 ? (
+                {visibleBlocks.length === 0 ? (
                   <div className="py-10 text-center text-xs text-muted-foreground">
-                    {search ? 'No matches found.' : 'No ideas yet.'}
+                    {search ? 'No matches found.' : 'No blocks yet.'}
                   </div>
                 ) : (
                   <ul className="space-y-0.5 pb-4">
-                    {visible.map(idea => {
-                      const previewText = idea.context || idea.tweet || idea.linkedin || idea.substackBody || ''
+                    {visibleBlocks.map(idea => {
+                      const previewText = idea.context || idea.tweet || idea.linkedin || idea.substackBody || idea.shorts || idea.vod || ''
                       const isActive = idea.id === activeId
                       return (
                         <li key={idea.id}>
@@ -193,21 +283,18 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
                               isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50 text-foreground'
                             )}
                           >
-                            <div className="flex items-start gap-2.5">
-                              <StatusDot status={idea.status} />
-                              <div className="min-w-0 flex-1">
-                                <p className={cn('truncate text-sm font-medium leading-tight', !idea.title && 'italic text-muted-foreground')}>
-                                  {idea.title || 'Untitled idea'}
-                                </p>
-                                {previewText && (
-                                  <p className="mt-0.5 truncate text-xs text-muted-foreground">{previewText}</p>
-                                )}
-                                <div className="mt-1.5 flex items-center gap-1.5">
-                                  {idea.tweet        && <PlatformPip label="X"  color="bg-foreground" />}
-                                  {idea.linkedin     && <PlatformPip label="in" color="bg-blue-600"   />}
-                                  {idea.substackBody && <PlatformPip label="S"  color="bg-orange-500" />}
-                                </div>
-                              </div>
+                            <p className={cn('truncate text-sm font-medium leading-tight', !idea.title && 'italic text-muted-foreground')}>
+                              {idea.title || 'Untitled block'}
+                            </p>
+                            {previewText && (
+                              <p className="mt-0.5 truncate text-xs text-muted-foreground">{previewText}</p>
+                            )}
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              {idea.tweet        && <PlatformPip label="X"  color="bg-foreground" />}
+                              {idea.linkedin     && <PlatformPip label="in" color="bg-blue-600"   />}
+                              {idea.substackBody && <PlatformPip label="S"  color="bg-orange-500" />}
+                              {idea.shorts       && <PlatformPip label="▶"  color="bg-rose-500"   />}
+                              {idea.vod          && <PlatformPip label="V"  color="bg-purple-600" />}
                             </div>
                           </button>
                         </li>
@@ -218,8 +305,11 @@ export function Sidebar({ ideas, activeId, onSelect, onAdd, onRestore }) {
               </ScrollArea>
             </>
           )}
-        </>
-      )}
+          </>
+        )}
+      </div>
+
+      <AuthPanel auth={auth} syncState={syncState} />
     </aside>
   )
 }

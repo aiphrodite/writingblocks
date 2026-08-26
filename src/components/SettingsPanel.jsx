@@ -10,6 +10,8 @@ const PLATFORM_PROMPTS = [
   { key: 'aiPromptTweet',     label: 'Tweet prompt',     glyph: '𝕏' },
   { key: 'aiPromptLinkedin',  label: 'LinkedIn prompt',  glyph: 'in' },
   { key: 'aiPromptSubstack',  label: 'Substack prompt',  glyph: 'S' },
+  { key: 'aiPromptShorts',    label: 'Shorts prompt',    glyph: '▶' },
+  { key: 'aiPromptVod',       label: 'VOD prompt',       glyph: 'V' },
 ]
 
 function Section({ title, children }) {
@@ -34,7 +36,7 @@ function Label({ htmlFor, children }) {
 }
 
 export function SettingsPanel({ ideas, onClose }) {
-  const { settings, update } = useSettings()
+  const { settings, settingsSyncState, update } = useSettings()
   const { theme, toggle: toggleTheme } = useTheme()
   const [showKey, setShowKey] = useState(false)
   const [promptsOpen, setPromptsOpen] = useState(false)
@@ -64,7 +66,7 @@ export function SettingsPanel({ ideas, onClose }) {
         <button
           type="button"
           onClick={onClose}
-          title="Back to ideas"
+          title="Back to blocks"
           className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -106,6 +108,17 @@ export function SettingsPanel({ ideas, onClose }) {
 
       {/* ── AI ── */}
       <Section title="AI Generation">
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-[10px] text-muted-foreground">
+          LLM provider, model, and API keys sync to your signed-in Supabase user.
+          {settingsSyncState?.status && (
+            <span className={settingsSyncState.status === 'error' ? 'ml-1 text-destructive' : 'ml-1'}>
+              {settingsSyncState.status === 'error'
+                ? `Sync issue: ${settingsSyncState.error}`
+                : `Status: ${settingsSyncState.status}`}
+            </span>
+          )}
+        </div>
+
         {/* Provider */}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="ai-provider">Provider</Label>
@@ -208,7 +221,7 @@ export function SettingsPanel({ ideas, onClose }) {
                 </div>
               ))}
               <p className="text-[10px] text-muted-foreground/60">
-                These system prompts are sent to the selected AI provider along with your idea title and context.
+                These system prompts are sent to the selected AI provider along with your block title and context.
               </p>
             </div>
           )}
@@ -226,10 +239,10 @@ export function SettingsPanel({ ideas, onClose }) {
             className="h-8 w-full justify-start gap-2 text-xs"
           >
             <Download className="h-3.5 w-3.5" />
-            Download all ideas as JSON
+            Download all blocks as JSON
           </Button>
           <p className="text-[10px] text-muted-foreground/60">
-            {ideas.length} {ideas.length === 1 ? 'idea' : 'ideas'} · ideas are also auto-saved to localStorage
+            {ideas.length} {ideas.length === 1 ? 'block' : 'blocks'} · auto-saved to localStorage
           </p>
         </div>
       </Section>
